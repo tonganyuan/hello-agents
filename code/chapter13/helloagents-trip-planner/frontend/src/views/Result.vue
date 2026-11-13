@@ -197,6 +197,18 @@
                         <div v-if="item.ticket_price" class="price-tag">
                           ¥{{ item.ticket_price }}
                         </div>
+                        <!-- 刷新该景点图片 -->
+                        <a-tooltip title="刷新景点图片" placement="left">
+                          <button
+                            type="button"
+                            class="refresh-image-btn"
+                            :class="{ 'is-loading': !!refreshingNames[item.name] }"
+                            :disabled="!!refreshingNames[item.name]"
+                            @click.stop="refreshImg(item.name)"
+                          >
+                            🔄
+                          </button>
+                        </a-tooltip>
                       </div>
 
                       <!-- 编辑模式下可编辑的字段 -->
@@ -322,6 +334,7 @@ const tripPlan = ref<TripPlan | null>(null)
 const editMode = ref(false)
 const originalPlan = ref<TripPlan | null>(null)
 const attractionPhotos = ref<Record<string, string>>({})
+const refreshingNames = ref<Record<string, boolean>>({})
 const activeSection = ref('overview')
 const activeDays = ref<number[]>([0]) // 默认展开第一天
 let map: any = null
@@ -424,6 +437,33 @@ const getMealLabel = (type: string): string => {
   return labels[type] || type
 }
 
+// 请求单个景点的图片链接
+const fetchAttractionPhotoUrl = async (name: string): Promise<string | null> => {
+  try {
+    const res = await fetch(`/api/poi/photo?name=${encodeURIComponent(name)}`)
+    const data = await res.json()
+    if (data.success && data.data?.photo_url) {
+      return data.data.photo_url as string
+    }
+    return null
+  } catch (err) {
+    console.error(`获取${name}图片失败:`, err)
+    return null
+  }
+}
+
+// 给图片链接加上时间戳,避免浏览器缓存导致图片不更新
+const withCacheBust = (url: string): string => {
+  try {
+    const parsed = new URL(url)
+    parsed.searchParams.set('_t', String(Date.now()))
+    return parsed.toString()
+  } catch {
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}_t=${Date.now()}`
+  }
+}
+
 // 加载所有景点图片
 const loadAttractionPhotos = async () => {
   if (!tripPlan.value) return
@@ -432,23 +472,34 @@ const loadAttractionPhotos = async () => {
 
   tripPlan.value.days.forEach(day => {
     day.attractions.forEach(attraction => {
-      const promise = fetch(`http://localhost:8000/api/poi/photo?name=${attraction.name}`)
-        .then(res => res.json())
-        .then(data => {
-          console.log("图片信息：{}",data)
-          if (data.success && data.data.photo_url) {
-            attractionPhotos.value[attraction.name] = data.data.photo_url
-          }
-        })
-        .catch(err => {
-          console.error(`获取${attraction.name}图片失败:`, err)
-        })
-
-      promises.push(promise)
+      promises.push((async () => {
+        const photoUrl = await fetchAttractionPhotoUrl(attraction.name)
+        if (photoUrl) {
+          attractionPhotos.value[attraction.name] = photoUrl
+        }
+      })())
     })
   })
 
   await Promise.all(promises)
+}
+
+// 刷新单个景点的图片:重新请求图片接口并强制浏览器重新加载
+const refreshImg = async (name: string) => {
+  if (!name || refreshingNames.value[name]) return
+
+  refreshingNames.value[name] = true
+  try {
+    const photoUrl = await fetchAttractionPhotoUrl(name)
+    if (photoUrl) {
+      attractionPhotos.value[name] = withCacheBust(photoUrl)
+      message.success(`「${name}」图片已刷新`)
+    } else {
+      message.warning(`「${name}」图片刷新失败,请稍后重试`)
+    }
+  } finally {
+    refreshingNames.value[name] = false
+  }
 }
 
 // 获取景点图片
@@ -1024,6 +1075,51 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
   font-weight: bold;
   font-size: 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 图片上的刷新按钮 */
+.refresh-image-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.refresh-image-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  transform: scale(1.08);
+}
+
+.refresh-image-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+.refresh-image-btn.is-loading {
+  animation: refreshSpin 0.8s linear infinite;
+}
+
+@keyframes refreshSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 天气卡片样式 */

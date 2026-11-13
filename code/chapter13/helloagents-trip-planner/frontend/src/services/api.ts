@@ -1,7 +1,9 @@
 import axios from 'axios'
 import type { TripFormData, TripPlanResponse } from '@/types'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+// 默认走同源相对路径(生产环境由 nginx 反代 /api 到后端)，
+// 需要直连后端时在 .env 里显式设置 VITE_API_BASE_URL，例如 http://localhost:8000
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
